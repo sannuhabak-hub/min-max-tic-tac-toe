@@ -1,17 +1,21 @@
 """Min-Max (XOX) mäng AI vastu, koos skoori, ajaloo ja AI arvutuskoormuse näitajaga.
 
+Kujundus: kirsiõie (sakura) teema värvides #d52a63 / #e59693 / #621027,
+koos langevate kirsiõite animatsiooniga.
+
 Käivitamine: py main.py  (või topeltklõps Kaivita_mang.bat failil)
 """
 
 import json
 import os
+import random
 import time
 import tkinter as tk
 from tkinter import ttk
 from datetime import datetime
 
 HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ajalugu.json")
-MAX_HISTORY = 200          # kui palju tulemusi failis säilitada
+MAX_HISTORY = 200           # kui palju tulemusi failis säilitada
 VISIBLE_HISTORY = 10        # kui palju viimast mängu näidatakse akna peal
 
 PLAYER = "X"
@@ -23,6 +27,25 @@ WIN_LINES = [
     (0, 4, 8), (2, 4, 6),
 ]
 
+# ---------- Kirsiõie värvipalett ----------
+ACCENT = "#d52a63"        # elav roosa-punane — nupud, rõhuasetused
+ACCENT_SOFT = "#e59693"   # pehme roosa — taustad, õrnad detailid
+ACCENT_DARK = "#621027"   # sügav bordoo — tekst, raamid
+ACCENT_HOVER = "#aa224f"  # tumedam roosa — hõljutus/vajutus
+BG_LIGHT = "#fbeced"      # väga õrn roosakas aknataust
+PANEL_BG = "#f6d9d8"      # paneelide taust
+CELL_BG = "#fffafa"       # mängulahtri taust
+DRAW_TEXT = "#8a4a4f"     # viigi teate toon (palett, tumendatud)
+
+# ---------- Fondid ----------
+FONT_TITLE = ("Segoe Script", 24, "bold")      # kaunistuslik pealkiri
+FONT_STATUS = ("Segoe Script", 14, "bold")     # mängu olek
+FONT_UI = ("Candara", 10)                      # üldine liidese font
+FONT_UI_BOLD = ("Candara", 10, "bold")
+FONT_HEADER = ("Candara", 11, "bold")
+FONT_CELL = ("Candara", 30, "bold")            # X / O lahtrites
+FONT_LIST = ("Candara", 9)
+
 
 def check_winner(board):
     for a, b, c in WIN_LINES:
@@ -30,6 +53,13 @@ def check_winner(board):
             return board[a]
     if " " not in board:
         return "DRAW"
+    return None
+
+
+def find_winning_line(board):
+    for a, b, c in WIN_LINES:
+        if board[a] != " " and board[a] == board[b] == board[c]:
+            return (a, b, c)
     return None
 
 
@@ -54,11 +84,54 @@ class AIStats:
         self.max_seen_nodes = max(self.max_seen_nodes, nodes)
 
 
+class PetalField:
+    """Langevate kirsiõie õite (sakura) animatsioon ühel Canvasel."""
+
+    PETAL_COLORS = (ACCENT, ACCENT_SOFT, "#f3c3c0", ACCENT_DARK)
+
+    def __init__(self, canvas, count=10):
+        self.canvas = canvas
+        self.petals = []
+        for _ in range(count):
+            self.petals.append(self._make_petal(random_y=True))
+        self.canvas.bind("<Configure>", lambda e: None)
+        self._animate()
+
+    def _make_petal(self, random_y=False):
+        w = max(self.canvas.winfo_width(), 40)
+        x = random.uniform(0, w)
+        y = random.uniform(0, 600) if random_y else -10
+        size = random.uniform(5, 10)
+        speed = random.uniform(0.6, 1.6)
+        drift = random.uniform(-0.6, 0.6)
+        phase = random.uniform(0, 6.28)
+        color = random.choice(self.PETAL_COLORS)
+        item = self.canvas.create_oval(x, y, x + size, y + size * 0.8, fill=color, outline="")
+        return {"item": item, "x": x, "y": y, "size": size, "speed": speed,
+                "drift": drift, "phase": phase}
+
+    def _animate(self):
+        h = max(self.canvas.winfo_height(), 400)
+        w = max(self.canvas.winfo_width(), 40)
+        for p in self.petals:
+            p["phase"] += 0.05
+            p["y"] += p["speed"]
+            p["x"] += p["drift"] + 0.4 * (0.5 - random.random())
+            if p["y"] > h:
+                p["y"] = -10
+                p["x"] = random.uniform(0, w)
+            self.canvas.coords(
+                p["item"], p["x"], p["y"], p["x"] + p["size"], p["y"] + p["size"] * 0.8
+            )
+        self.canvas.after(45, self._animate)
+
+
 class MinimaxApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Min-Max XOX mäng")
+        self.title("🌸 Min-Max XOX mäng 🌸")
         self.resizable(False, False)
+        self.configure(bg=BG_LIGHT)
 
         self.board = [" "] * 9
         self.buttons = []
@@ -68,6 +141,7 @@ class MinimaxApp(tk.Tk):
         self.difficulty = tk.StringVar(value="Raske (täis minimax)")
         self.history = self.load_history()
 
+        self._build_style()
         self._build_ui()
         self._new_game()
 
@@ -88,30 +162,97 @@ class MinimaxApp(tk.Tk):
         except OSError:
             pass
 
+    # ---------- Stiil ----------
+    def _build_style(self):
+        style = ttk.Style(self)
+        style.theme_use("clam")
+
+        style.configure(".", background=BG_LIGHT, font=FONT_UI, foreground=ACCENT_DARK)
+        style.configure("TFrame", background=BG_LIGHT)
+        style.configure("TLabel", background=BG_LIGHT, foreground=ACCENT_DARK, font=FONT_UI)
+
+        style.configure(
+            "TLabelframe", background=PANEL_BG, bordercolor=ACCENT_SOFT,
+            relief="groove", borderwidth=2,
+        )
+        style.configure(
+            "TLabelframe.Label", background=PANEL_BG, foreground=ACCENT_DARK,
+            font=FONT_HEADER,
+        )
+
+        style.configure(
+            "TButton", background=ACCENT, foreground="white", font=FONT_UI_BOLD,
+            padding=6, relief="flat", borderwidth=0,
+        )
+        style.map(
+            "TButton",
+            background=[("active", ACCENT_HOVER), ("disabled", ACCENT_SOFT)],
+            foreground=[("disabled", "#ffffff")],
+        )
+
+        style.configure(
+            "TCombobox", fieldbackground=CELL_BG, background=PANEL_BG,
+            foreground=ACCENT_DARK, arrowcolor=ACCENT_DARK,
+        )
+        style.map("TCombobox", fieldbackground=[("readonly", CELL_BG)])
+
+        style.configure(
+            "Petal.Horizontal.TProgressbar", troughcolor=PANEL_BG,
+            background=ACCENT, bordercolor=PANEL_BG, lightcolor=ACCENT, darkcolor=ACCENT,
+        )
+
+        style.configure(
+            "Vertical.TScrollbar", background=ACCENT_SOFT, troughcolor=PANEL_BG,
+            arrowcolor=ACCENT_DARK,
+        )
+
     # ---------- UI ----------
     def _build_ui(self):
-        root = ttk.Frame(self, padding=12)
-        root.grid(row=0, column=0, sticky="nsew")
+        # ---- Ülemine kaunistusriba kirsiõitega ----
+        banner = tk.Canvas(self, height=70, bg=ACCENT_SOFT, highlightthickness=0)
+        banner.grid(row=0, column=0, columnspan=3, sticky="ew")
+        title_item = banner.create_text(
+            0, 35, text="🌸  Min-Max XOX mäng  🌸",
+            font=FONT_TITLE, fill=ACCENT_DARK,
+        )
+        PetalField(banner, count=14)
+
+        # ---- Vasak kaunistusriba ----
+        left_petals = tk.Canvas(self, width=42, height=560, bg=BG_LIGHT, highlightthickness=0)
+        left_petals.grid(row=1, column=0, sticky="ns")
+        PetalField(left_petals, count=8)
+
+        # ---- Keskmine sisu ----
+        root = tk.Frame(self, bg=BG_LIGHT, padx=14, pady=12)
+        root.grid(row=1, column=1, sticky="nsew")
 
         # ---- Vasak: mängulaud ----
-        board_frame = ttk.Frame(root)
+        board_frame = tk.Frame(root, bg=BG_LIGHT)
         board_frame.grid(row=0, column=0, rowspan=3, padx=(0, 16))
 
         for i in range(9):
             btn = tk.Button(
-                board_frame, text=" ", font=("Segoe UI", 28, "bold"),
+                board_frame, text=" ", font=FONT_CELL,
                 width=4, height=2,
+                bg=CELL_BG, fg=ACCENT_DARK,
+                activebackground=ACCENT_SOFT,
+                relief="ridge", borderwidth=2,
+                highlightbackground=ACCENT_SOFT,
                 command=lambda i=i: self._on_cell_click(i),
             )
             btn.grid(row=i // 3, column=i % 3, padx=3, pady=3)
+            btn.bind("<Enter>", lambda e, i=i: self._on_cell_hover(i, True))
+            btn.bind("<Leave>", lambda e, i=i: self._on_cell_hover(i, False))
             self.buttons.append(btn)
 
-        self.status_label = ttk.Label(board_frame, text="", font=("Segoe UI", 11, "bold"))
+        self.status_label = tk.Label(
+            board_frame, text="", font=FONT_STATUS, bg=BG_LIGHT, fg=ACCENT_DARK,
+        )
         self.status_label.grid(row=3, column=0, columnspan=3, pady=(10, 0))
 
-        controls = ttk.Frame(board_frame)
+        controls = tk.Frame(board_frame, bg=BG_LIGHT)
         controls.grid(row=4, column=0, columnspan=3, pady=(8, 0), sticky="ew")
-        ttk.Label(controls, text="Raskusaste:").pack(side="left")
+        tk.Label(controls, text="Raskusaste:", bg=BG_LIGHT, fg=ACCENT_DARK, font=FONT_UI).pack(side="left")
         diff_box = ttk.Combobox(
             controls, textvariable=self.difficulty, state="readonly", width=20,
             values=["Lihtne (2 käiku ette)", "Keskmine (4 käiku ette)", "Raske (täis minimax)"],
@@ -119,45 +260,55 @@ class MinimaxApp(tk.Tk):
         diff_box.pack(side="left", padx=6)
         diff_box.current(2)
 
-        ttk.Button(board_frame, text="Uus mäng", command=self._new_game).grid(
+        ttk.Button(board_frame, text="🌸 Uus mäng", command=self._new_game).grid(
             row=5, column=0, columnspan=3, pady=(10, 0), sticky="ew"
         )
 
         # ---- Parem: skoor + juhtseis ----
-        right = ttk.Frame(root)
+        right = tk.Frame(root, bg=BG_LIGHT)
         right.grid(row=0, column=1, sticky="nsew")
 
-        score_box = ttk.LabelFrame(right, text="Skoor", padding=8)
+        score_box = ttk.LabelFrame(right, text="🌸 Skoor", padding=8)
         score_box.pack(fill="x", pady=(0, 8))
-        self.score_label = ttk.Label(score_box, text="", font=("Segoe UI", 11))
+        self.score_label = tk.Label(score_box, text="", font=FONT_UI, bg=PANEL_BG, fg=ACCENT_DARK)
         self.score_label.pack(anchor="w")
-        self.lead_label = ttk.Label(score_box, text="", font=("Segoe UI", 12, "bold"))
+        self.lead_label = tk.Label(score_box, text="", font=FONT_UI_BOLD, bg=PANEL_BG)
         self.lead_label.pack(anchor="w", pady=(4, 0))
 
         # ---- AI arvutuskoormus ("mahtu") ----
-        load_box = ttk.LabelFrame(right, text="AI arvutuskoormus", padding=8)
+        load_box = ttk.LabelFrame(right, text="🌸 AI arvutuskoormus", padding=8)
         load_box.pack(fill="x", pady=(0, 8))
 
-        ttk.Label(load_box, text="Viimane käik:").grid(row=0, column=0, sticky="w")
-        self.ai_nodes_label = ttk.Label(load_box, text="0 seisu")
+        tk.Label(load_box, text="Viimane käik:", bg=PANEL_BG, fg=ACCENT_DARK, font=FONT_UI).grid(row=0, column=0, sticky="w")
+        self.ai_nodes_label = tk.Label(load_box, text="0 seisu", bg=PANEL_BG, fg=ACCENT_DARK, font=FONT_UI)
         self.ai_nodes_label.grid(row=0, column=1, sticky="e")
 
-        ttk.Label(load_box, text="Aeg:").grid(row=1, column=0, sticky="w")
-        self.ai_time_label = ttk.Label(load_box, text="0 ms")
+        tk.Label(load_box, text="Aeg:", bg=PANEL_BG, fg=ACCENT_DARK, font=FONT_UI).grid(row=1, column=0, sticky="w")
+        self.ai_time_label = tk.Label(load_box, text="0 ms", bg=PANEL_BG, fg=ACCENT_DARK, font=FONT_UI)
         self.ai_time_label.grid(row=1, column=1, sticky="e")
 
-        self.ai_load_bar = ttk.Progressbar(load_box, orient="horizontal", length=200, mode="determinate")
+        self.ai_load_bar = ttk.Progressbar(
+            load_box, orient="horizontal", length=200, mode="determinate",
+            style="Petal.Horizontal.TProgressbar",
+        )
         self.ai_load_bar.grid(row=2, column=0, columnspan=2, pady=(6, 0), sticky="ew")
 
-        ttk.Label(load_box, text="Kokku selles mängus:").grid(row=3, column=0, sticky="w", pady=(6, 0))
-        self.ai_total_label = ttk.Label(load_box, text="0 seisu")
+        tk.Label(load_box, text="Kokku selles mängus:", bg=PANEL_BG, fg=ACCENT_DARK, font=FONT_UI).grid(
+            row=3, column=0, sticky="w", pady=(6, 0)
+        )
+        self.ai_total_label = tk.Label(load_box, text="0 seisu", bg=PANEL_BG, fg=ACCENT_DARK, font=FONT_UI)
         self.ai_total_label.grid(row=3, column=1, sticky="e", pady=(6, 0))
 
         # ---- Ajalugu ----
-        hist_box = ttk.LabelFrame(right, text=f"Viimased {VISIBLE_HISTORY} mängu", padding=8)
+        hist_box = ttk.LabelFrame(right, text=f"🌸 Viimased {VISIBLE_HISTORY} mängu", padding=8)
         hist_box.pack(fill="both", expand=True)
 
-        self.history_list = tk.Listbox(hist_box, width=38, height=10, font=("Consolas", 9))
+        self.history_list = tk.Listbox(
+            hist_box, width=38, height=10, font=FONT_LIST,
+            bg=CELL_BG, fg=ACCENT_DARK, selectbackground=ACCENT,
+            selectforeground="white", relief="flat", highlightthickness=1,
+            highlightbackground=ACCENT_SOFT,
+        )
         self.history_list.pack(fill="both", expand=True)
 
         ttk.Button(hist_box, text="Näita kogu ajalugu...", command=self._open_full_history).pack(
@@ -167,19 +318,36 @@ class MinimaxApp(tk.Tk):
         root.columnconfigure(0, weight=0)
         root.columnconfigure(1, weight=1)
 
+        # ---- Parem kaunistusriba ----
+        right_petals = tk.Canvas(self, width=42, height=560, bg=BG_LIGHT, highlightthickness=0)
+        right_petals.grid(row=1, column=2, sticky="ns")
+        PetalField(right_petals, count=8)
+
+        # Pealkiri joondatakse täpselt mängulaua kohale, kui mõõdud on teada.
+        self.update_idletasks()
+        board_center_x = (
+            board_frame.winfo_rootx() - banner.winfo_rootx() + board_frame.winfo_width() / 2
+        )
+        banner.coords(title_item, board_center_x, banner.winfo_height() / 2)
+
+    def _on_cell_hover(self, idx, entering):
+        if self.game_over or self.board[idx] != " ":
+            return
+        self.buttons[idx].config(bg=ACCENT_SOFT if entering else CELL_BG)
+
     # ---------- Mängu loogika ----------
     def _new_game(self):
         self.board = [" "] * 9
         self.game_over = False
         self.stats.reset_game()
         for btn in self.buttons:
-            btn.config(text=" ", state="normal", bg="SystemButtonFace")
+            btn.config(text=" ", state="normal", bg=CELL_BG, fg=ACCENT_DARK)
         self._refresh_score()
         self._refresh_ai_load()
         self._refresh_history_box()
 
         if self.starter == AI:
-            self.status_label.config(text="Arvuti alustab...")
+            self.status_label.config(text="Arvuti alustab... 🌸")
             self.after(300, self._ai_move)
         else:
             self.status_label.config(text="Sinu käik (X)")
@@ -188,12 +356,12 @@ class MinimaxApp(tk.Tk):
         if self.game_over or self.board[idx] != " ":
             return
         self.board[idx] = PLAYER
-        self.buttons[idx].config(text=PLAYER)
+        self.buttons[idx].config(text=PLAYER, fg=ACCENT_DARK)
         result = check_winner(self.board)
         if result:
             self._finish_game(result)
             return
-        self.status_label.config(text="Arvuti mõtleb...")
+        self.status_label.config(text="Arvuti mõtleb... 🌸")
         self.update_idletasks()
         self.after(150, self._ai_move)
 
@@ -212,7 +380,7 @@ class MinimaxApp(tk.Tk):
         if move is None:
             return
         self.board[move] = AI
-        self.buttons[move].config(text=AI)
+        self.buttons[move].config(text=AI, fg=ACCENT)
 
         result = check_winner(self.board)
         if result:
@@ -280,14 +448,19 @@ class MinimaxApp(tk.Tk):
             btn.config(state="disabled")
 
         if result == PLAYER:
-            self.status_label.config(text="Sa võitsid! 🎉")
+            self.status_label.config(text="Sa võitsid! 🎉🌸")
             outcome = "player"
         elif result == AI:
-            self.status_label.config(text="Arvuti võitis.")
+            self.status_label.config(text="Arvuti võitis. 🌸")
             outcome = "ai"
         else:
-            self.status_label.config(text="Viik!")
+            self.status_label.config(text="Viik! 🌸")
             outcome = "draw"
+
+        line = find_winning_line(self.board)
+        if line:
+            for idx in line:
+                self.buttons[idx].config(bg=ACCENT, fg="white", disabledforeground="white")
 
         entry = {
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -317,11 +490,11 @@ class MinimaxApp(tk.Tk):
         )
 
         if wins > losses:
-            self.lead_label.config(text="🟢 Sa oled ülekaalus!", foreground="#1a7a1a")
+            self.lead_label.config(text="🌸 Sa oled ülekaalus!", fg=ACCENT_DARK, bg=PANEL_BG)
         elif losses > wins:
-            self.lead_label.config(text="🔴 Arvuti on ülekaalus.", foreground="#b00020")
+            self.lead_label.config(text="🥀 Arvuti on ülekaalus.", fg=ACCENT, bg=PANEL_BG)
         else:
-            self.lead_label.config(text="⚪ Täpselt viigis.", foreground="#555555")
+            self.lead_label.config(text="🌱 Täpselt viigis.", fg=DRAW_TEXT, bg=PANEL_BG)
 
     def _refresh_ai_load(self):
         self.ai_nodes_label.config(text=f"{self.stats.last_nodes:,} seisu")
@@ -344,25 +517,30 @@ class MinimaxApp(tk.Tk):
 
     def _open_full_history(self):
         win = tk.Toplevel(self)
-        win.title("Kõik mängude tulemused")
+        win.title("🌸 Kõik mängude tulemused")
         win.geometry("480x420")
+        win.configure(bg=BG_LIGHT)
 
         wins = sum(1 for h in self.history if h["result"] == "player")
         losses = sum(1 for h in self.history if h["result"] == "ai")
         draws = sum(1 for h in self.history if h["result"] == "draw")
 
-        summary = ttk.Label(
+        summary = tk.Label(
             win,
             text=f"Kokku {len(self.history)} mängu   —   Sina: {wins}  Arvuti: {losses}  Viigid: {draws}",
-            font=("Segoe UI", 10, "bold"),
+            font=FONT_UI_BOLD, bg=BG_LIGHT, fg=ACCENT_DARK,
         )
         summary.pack(pady=(10, 4))
 
-        frame = ttk.Frame(win)
+        frame = tk.Frame(win, bg=BG_LIGHT)
         frame.pack(fill="both", expand=True, padx=10, pady=10)
 
         scrollbar = ttk.Scrollbar(frame, orient="vertical")
-        listbox = tk.Listbox(frame, font=("Consolas", 9), yscrollcommand=scrollbar.set)
+        listbox = tk.Listbox(
+            frame, font=FONT_LIST, yscrollcommand=scrollbar.set,
+            bg=CELL_BG, fg=ACCENT_DARK, selectbackground=ACCENT, selectforeground="white",
+            relief="flat", highlightthickness=1, highlightbackground=ACCENT_SOFT,
+        )
         scrollbar.config(command=listbox.yview)
         scrollbar.pack(side="right", fill="y")
         listbox.pack(side="left", fill="both", expand=True)
